@@ -5,10 +5,25 @@ const app = express();
 const PORT = process.env.PORT || 8000;
 const ML_SERVICE_URL = process.env.ML_SERVICE_URL || 'http://ml-service:8000';
 const API_SERVER_URL = process.env.API_SERVER_URL || 'http://api-server:5000';
-const CONFIDENCE_THRESHOLD = parseFloat(process.env.CONFIDENCE_THRESHOLD || '0.8');
+let CONFIDENCE_THRESHOLD = parseFloat(process.env.CONFIDENCE_THRESHOLD || '0.8');
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// GET & POST /config - Dynamic Security Sensitivity Control
+app.get('/config', (req, res) => {
+  res.json({ confidenceThreshold: CONFIDENCE_THRESHOLD });
+});
+
+app.post('/config', (req, res) => {
+  const { threshold } = req.body;
+  if (typeof threshold === 'number' && threshold >= 0.1 && threshold <= 1.0) {
+    CONFIDENCE_THRESHOLD = threshold;
+    console.log(`[Gateway Config] Updated protection sensitivity threshold to ${(CONFIDENCE_THRESHOLD * 100).toFixed(0)}%`);
+    return res.json({ success: true, confidenceThreshold: CONFIDENCE_THRESHOLD });
+  }
+  res.status(400).json({ error: 'Threshold must be a number between 0.1 and 1.0' });
+});
 
 // Health check endpoint
 app.get('/health', (req, res) => {

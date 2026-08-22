@@ -3,6 +3,7 @@ import sys
 import pandas as pd
 import numpy as np
 import joblib
+import re
 
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
@@ -25,27 +26,12 @@ def train():
     print(f"Dataset loaded: {len(df)} total rows.")
     print("Label distribution:\n", df['label'].value_counts())
 
-    print("\nExtracting request features...")
-    
-    # Vectorized feature calculation for speed
-    url_str = df['url'].astype(str)
-    body_str = df['body'].astype(str)
-    combined = (url_str + " " + body_str).str.lower()
-    
-    special_chars = ['\'', '"', '<', '>', ';', '--', '|', '&', '$', '%', '`']
-    sqli_pats = ['union select', 'or 1=1', 'select ', 'information_schema', '\'--', 'drop table', 'exec', '; select']
-    xss_pats = ['<script>', 'javascript:', 'onerror=', 'onload=', 'document.cookie', 'eval(', 'alert(']
-    cmd_pats = ['; rm', '| bash', '| sh', 'cat /etc', '`', '$(', 'wget ', 'curl ']
-
-    X = pd.DataFrame({
-        'url_length': url_str.str.len(),
-        'body_length': body_str.str.len(),
-        'special_char_count': sum(combined.str.count(c, regex=False) for c in special_chars),
-        'sqli_pattern_count': sum(combined.str.count(p, regex=False) for p in sqli_pats),
-        'xss_pattern_count': sum(combined.str.count(p, regex=False) for p in xss_pats),
-        'cmd_pattern_count': sum(combined.str.count(p, regex=False) for p in cmd_pats),
-        'header_count': 1
-    })
+    print("\nExtracting request features using identical pipeline...")
+    features_list = [
+        extract_features_dict(row['method'], row['url'], row['headers'], row['body'])
+        for _, row in df.iterrows()
+    ]
+    X = pd.DataFrame(features_list)[FEATURE_COLUMNS]
 
     y = df['label'].astype(str)
 

@@ -87,6 +87,50 @@ export default function App() {
     }
   };
 
+  const handleDeploy = async (e) => {
+    e.preventDefault();
+    if (!repoUrl) return;
+
+    setIsDeploying(true);
+    setDeployFeedback({ type: 'info', message: 'Triggering deployment build...' });
+
+    try {
+      const res = await fetch(`${API_BASE}/api/apps/deploy`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ repoUrl, name: appName || 'My Application' })
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        setDeployFeedback({
+          type: 'success',
+          message: `Deployment initiated successfully! App ID: ${data.app.id}`
+        });
+        setRepoUrl('');
+        setAppName('');
+        fetchDashboardData();
+      } else {
+        setDeployFeedback({
+          type: 'error',
+          message: `Deployment failed: ${data.error}`
+        });
+      }
+    } catch (err) {
+      setDeployFeedback({
+        type: 'error',
+        message: `Network error triggering deploy: ${err.message}`
+      });
+    } finally {
+      setIsDeploying(false);
+    }
+  };
+
+  const fillSampleApp = () => {
+    setRepoUrl('local://sample-app');
+    setAppName('Sample Express Service');
+  };
+
   return (
     <div className="dashboard-layout">
       <header>
@@ -178,98 +222,26 @@ export default function App() {
               </div>
 
               {testResult && (
-                <div style={{ marginTop: '0.75rem', padding: '0.5rem 0.8rem', borderRadius: '4px', fontSize: '0.85rem', background: testResult.status === 'blocked' ? 'rgba(239,68,68,0.2)' : 'rgba(16,185,129,0.2)', border: `1px solid ${testResult.status === 'blocked' ? '#ef4444' : '#10b981'}`, color: testResult.status === 'blocked' ? '#fca5a5' : '#6ee7b7' }}>
-                  <strong>{testResult.title}</strong> {testResult.threat ? `— Category: ${testResult.threat} (${testResult.confidence})` : ''}
+                <div style={{ 
+                  marginTop: '0.75rem', 
+                  padding: '0.5rem 0.8rem', 
+                  borderRadius: '4px', 
+                  fontSize: '0.85rem', 
+                  background: testResult.status === 'blocked' || testResult.status === 'error' ? 'rgba(239,68,68,0.2)' : testResult.status === 'testing' ? 'rgba(56,189,248,0.2)' : 'rgba(16,185,129,0.2)', 
+                  border: `1px solid ${testResult.status === 'blocked' || testResult.status === 'error' ? '#ef4444' : testResult.status === 'testing' ? '#38bdf8' : '#10b981'}`, 
+                  color: testResult.status === 'blocked' || testResult.status === 'error' ? '#fca5a5' : testResult.status === 'testing' ? '#bae6fd' : '#6ee7b7' 
+                }}>
+                  {testResult.status === 'error' ? (
+                    <span><strong>⚠️ Connection Error:</strong> {testResult.message}</span>
+                  ) : testResult.status === 'testing' ? (
+                    <span><strong>⏳ Testing:</strong> {testResult.message}</span>
+                  ) : (
+                    <span><strong>{testResult.title}</strong> {testResult.threat ? `— Category: ${testResult.threat} (${testResult.confidence})` : ''}</span>
+                  )}
                 </div>
               )}
             </div>
 
-          </div>
-        </div>
-
-  const handleDeploy = async (e) => {
-    e.preventDefault();
-    if (!repoUrl) return;
-
-    setIsDeploying(true);
-    setDeployFeedback({ type: 'info', message: 'Triggering deployment build...' });
-
-    try {
-      const res = await fetch(`${API_BASE}/api/apps/deploy`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ repoUrl, name: appName || 'My Application' })
-      });
-
-      const data = await res.json();
-      if (res.ok) {
-        setDeployFeedback({
-          type: 'success',
-          message: `Deployment initiated successfully! App ID: ${data.app.id}`
-        });
-        setRepoUrl('');
-        setAppName('');
-        fetchDashboardData();
-      } else {
-        setDeployFeedback({
-          type: 'error',
-          message: `Deployment failed: ${data.error}`
-        });
-      }
-    } catch (err) {
-      setDeployFeedback({
-        type: 'error',
-        message: `Network error triggering deploy: ${err.message}`
-      });
-    } finally {
-      setIsDeploying(false);
-    }
-  };
-
-  const fillSampleApp = () => {
-    setRepoUrl('local://sample-app');
-    setAppName('Sample Express Service');
-  };
-
-  return (
-    <div className="dashboard-layout">
-      <header>
-        <div className="brand">
-          🛡️ DeployShield
-          <span className="brand-badge">Runtime ML Guard</span>
-        </div>
-        <div className="status-indicator">
-          <span style={{ color: 'var(--accent-success)', fontWeight: 600 }}>
-            ● Active Gateway Connected
-          </span>
-        </div>
-      </header>
-
-      <main className="dashboard-grid">
-        {/* Top Metric Bar */}
-        <div className="card full-width">
-          <div className="card-title">Security & ML Runtime Telemetry</div>
-          <div className="stats-grid">
-            <div className="stat-box">
-              <div className="stat-label">Total Requests Evaluated</div>
-              <div className="stat-value" style={{ color: 'var(--accent-blue)' }}>
-                {stats.totalScored}
-              </div>
-            </div>
-            <div className="stat-box">
-              <div className="stat-label">Blocked Malicious Requests</div>
-              <div className="stat-value" style={{ color: 'var(--accent-danger)' }}>
-                {stats.totalBlocked}
-              </div>
-            </div>
-            <div className="stat-box">
-              <div className="stat-label">SQL Injection Blocks</div>
-              <div className="stat-value">{stats.blocksByType.SQLI || stats.blocksByType.SQLi || 0}</div>
-            </div>
-            <div className="stat-box">
-              <div className="stat-label">XSS Attacks Blocked</div>
-              <div className="stat-value">{stats.blocksByType.XSS || 0}</div>
-            </div>
           </div>
         </div>
 
@@ -355,7 +327,7 @@ export default function App() {
           )}
         </div>
 
-        {/* Deployed Apps Table */}
+        {/* Deployed Apps Registry */}
         <div className="card">
           <div className="card-title">
             Deployed Apps Registry ({apps.length})

@@ -1,6 +1,7 @@
 import re
 import json
 from typing import Dict, Any, Union, List
+from urllib.parse import unquote
 
 SPECIAL_CHARS = ['\'', '"', '<', '>', ';', '--', '|', '&', '$', '%', '`']
 
@@ -52,8 +53,8 @@ def parse_header_count(headers: Union[str, dict, None]) -> int:
     return 0
 
 def extract_features_dict(method: str, url: str, headers: Union[str, dict, None], body: str) -> Dict[str, Any]:
-    url_str = url or ''
-    body_str = body or ''
+    url_str = unquote(url or '')
+    body_str = unquote(body or '')
     combined_str = (url_str + " " + body_str).lower()
 
     # 1. Length features

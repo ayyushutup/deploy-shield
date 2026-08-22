@@ -10,6 +10,17 @@ let CONFIDENCE_THRESHOLD = parseFloat(process.env.CONFIDENCE_THRESHOLD || '0.8')
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Enable CORS for frontend requests
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  next();
+});
+
 // GET & POST /config - Dynamic Security Sensitivity Control
 app.get('/config', (req, res) => {
   res.json({ confidenceThreshold: CONFIDENCE_THRESHOLD });

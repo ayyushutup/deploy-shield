@@ -1,6 +1,6 @@
 FROM node:20-alpine
 # Install git and docker CLI if needed for cloning and docker socket commands
-RUN apk add --no-gradient --no-cache git docker-cli
+RUN apk add --no-cache git docker-cli
 WORKDIR /app
 COPY package*.json ./
 RUN npm install

@@ -18,6 +18,11 @@ export default function App() {
   const [isDeploying, setIsDeploying] = useState(false);
   const [deployFeedback, setDeployFeedback] = useState(null);
 
+  // Security controls state
+  const [sensitivity, setSensitivity] = useState(0.8);
+  const [testPayload, setTestPayload] = useState('GET /apps/sample-app-1/search?q=UNION SELECT 1,2,3');
+  const [testResult, setTestResult] = useState(null);
+
   // Fetch real telemetry from api-server
   const fetchDashboardData = async () => {
     try {
@@ -40,6 +45,47 @@ export default function App() {
     const interval = setInterval(fetchDashboardData, 3000);
     return () => clearInterval(interval);
   }, []);
+
+  const handleSensitivityChange = async (newVal) => {
+    setSensitivity(newVal);
+    try {
+      await fetch(`${GATEWAY_BASE}/config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ threshold: newVal })
+      });
+    } catch (err) {
+      console.error('Error updating gateway sensitivity:', err);
+    }
+  };
+
+  const runTestPayload = async () => {
+    setTestResult({ status: 'testing', message: 'Sending test request to gateway...' });
+    try {
+      const targetUrl = `${GATEWAY_BASE}${testPayload.replace(/^(GET|POST|PUT|DELETE)\s+/, '')}`;
+      const method = testPayload.startsWith('POST') ? 'POST' : 'GET';
+      const res = await fetch(targetUrl, { method });
+      const data = await res.json().catch(() => ({}));
+
+      if (res.status === 403) {
+        setTestResult({
+          status: 'blocked',
+          title: '⛔ BLOCKED BY DEPLOYSHIELD WAF',
+          threat: data.threatDetected || 'MALICIOUS PAYLOAD',
+          confidence: data.confidenceScore ? `${(data.confidenceScore * 100).toFixed(1)}%` : 'HIGH'
+        });
+      } else {
+        setTestResult({
+          status: 'allowed',
+          title: '✅ ALLOWED (BENIGN TRAFFIC)',
+          statusCode: res.status
+        });
+      }
+      fetchDashboardData();
+    } catch (err) {
+      setTestResult({ status: 'error', message: `Test connection error: ${err.message}` });
+    }
+  };
 
   const handleDeploy = async (e) => {
     e.preventDefault();
@@ -90,11 +136,11 @@ export default function App() {
       <header>
         <div className="brand">
           🛡️ DeployShield
-          <span className="brand-badge">Runtime ML Guard</span>
+          <span className="brand-badge">Consumer AI Security Shield</span>
         </div>
         <div className="status-indicator">
           <span style={{ color: 'var(--accent-success)', fontWeight: 600 }}>
-            ● Active Gateway Connected
+            ● AI Gateway Guard Active
           </span>
         </div>
       </header>
@@ -124,6 +170,78 @@ export default function App() {
               <div className="stat-label">XSS Attacks Blocked</div>
               <div className="stat-value">{stats.blocksByType.XSS || 0}</div>
             </div>
+          </div>
+        </div>
+
+        {/* Consumer Controls & Live Threat Simulator */}
+        <div className="card full-width" style={{ background: 'linear-gradient(180deg, #1e293b, #0f172a)', border: '1px solid #3b82f6' }}>
+          <div className="card-title" style={{ color: '#38bdf8' }}>⚙️ Consumer Security Sensitivity & Live Attack Simulator</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1.5rem', marginTop: '1rem' }}>
+            
+            {/* Sensitivity Slider */}
+            <div style={{ background: 'rgba(15, 23, 42, 0.6)', padding: '1rem', borderRadius: '8px', border: '1px solid #334155' }}>
+              <div style={{ fontWeight: 600, marginBottom: '0.5rem' }}>AI Protection Strictness Slider:</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '0.5rem' }}>
+                <input
+                  type="range"
+                  min="0.5"
+                  max="0.95"
+                  step="0.05"
+                  value={sensitivity}
+                  onChange={(e) => handleSensitivityChange(parseFloat(e.target.value))}
+                  style={{ flex: 1, accentColor: '#38bdf8' }}
+                />
+                <span style={{ fontWeight: 700, color: '#38bdf8', minWidth: '45px' }}>{(sensitivity * 100).toFixed(0)}%</span>
+              </div>
+              <div style={{ fontSize: '0.8rem', color: '#94a3b8' }}>
+                {sensitivity <= 0.65 ? '🟢 Relaxed Mode (Fewer false alarms)' : sensitivity >= 0.85 ? '🔴 Paranoid Mode (Max security for e-commerce)' : '🟡 Balanced Mode (Recommended default)'}
+              </div>
+            </div>
+
+            {/* Attack Simulator */}
+            <div style={{ background: 'rgba(15, 23, 42, 0.6)', padding: '1rem', borderRadius: '8px', border: '1px solid #334155' }}>
+              <div style={{ fontWeight: 600, marginBottom: '0.5rem' }}>Instant Attack Simulator:</div>
+              <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                <input
+                  type="text"
+                  value={testPayload}
+                  onChange={(e) => setTestPayload(e.target.value)}
+                  style={{ flex: 1, padding: '0.4rem 0.8rem', background: '#090d16', border: '1px solid #334155', color: '#fff', borderRadius: '4px', fontFamily: 'monospace', fontSize: '0.85rem' }}
+                />
+                <button
+                  onClick={runTestPayload}
+                  style={{ padding: '0.4rem 1rem', background: '#ef4444', color: '#fff', border: 'none', borderRadius: '4px', fontWeight: 600, cursor: 'pointer' }}
+                >
+                  Test Gateway
+                </button>
+              </div>
+              <div style={{ display: 'flex', gap: '0.5rem', fontSize: '0.75rem' }}>
+                <button onClick={() => setTestPayload('/apps/sample-app-1/search?q=UNION SELECT 1,2,3')} style={{ background: '#1e293b', border: '1px solid #475569', color: '#cbd5e1', borderRadius: '3px', cursor: 'pointer' }}>Test SQLi</button>
+                <button onClick={() => setTestPayload('/apps/sample-app-1/?user=<script>alert(1)</script>')} style={{ background: '#1e293b', border: '1px solid #475569', color: '#cbd5e1', borderRadius: '3px', cursor: 'pointer' }}>Test XSS</button>
+                <button onClick={() => setTestPayload('/apps/sample-app-1/exec?cmd=cat /etc/passwd')} style={{ background: '#1e293b', border: '1px solid #475569', color: '#cbd5e1', borderRadius: '3px', cursor: 'pointer' }}>Test CmdI</button>
+              </div>
+
+              {testResult && (
+                <div style={{ 
+                  marginTop: '0.75rem', 
+                  padding: '0.5rem 0.8rem', 
+                  borderRadius: '4px', 
+                  fontSize: '0.85rem', 
+                  background: testResult.status === 'blocked' || testResult.status === 'error' ? 'rgba(239,68,68,0.2)' : testResult.status === 'testing' ? 'rgba(56,189,248,0.2)' : 'rgba(16,185,129,0.2)', 
+                  border: `1px solid ${testResult.status === 'blocked' || testResult.status === 'error' ? '#ef4444' : testResult.status === 'testing' ? '#38bdf8' : '#10b981'}`, 
+                  color: testResult.status === 'blocked' || testResult.status === 'error' ? '#fca5a5' : testResult.status === 'testing' ? '#bae6fd' : '#6ee7b7' 
+                }}>
+                  {testResult.status === 'error' ? (
+                    <span><strong>⚠️ Connection Error:</strong> {testResult.message}</span>
+                  ) : testResult.status === 'testing' ? (
+                    <span><strong>⏳ Testing:</strong> {testResult.message}</span>
+                  ) : (
+                    <span><strong>{testResult.title}</strong> {testResult.threat ? `— Category: ${testResult.threat} (${testResult.confidence})` : ''}</span>
+                  )}
+                </div>
+              )}
+            </div>
+
           </div>
         </div>
 
@@ -209,7 +327,7 @@ export default function App() {
           )}
         </div>
 
-        {/* Deployed Apps Table */}
+        {/* Deployed Apps Registry */}
         <div className="card">
           <div className="card-title">
             Deployed Apps Registry ({apps.length})

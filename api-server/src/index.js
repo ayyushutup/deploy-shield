@@ -1,5 +1,8 @@
 const express = require('express');
 const cors = require('cors');
+const { pool } = require('./db');
+const { authenticateToken, generateToken } = require('./auth');
+const { predict } = require('./predict');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -7,162 +10,174 @@ const BUILD_SERVICE_URL = process.env.BUILD_SERVICE_URL || 'http://build-service
 
 app.use(cors());
 app.use(express.json());
+app.use(authenticateToken);
 
-// In-memory data stores
-const deployedApps = new Map();
-const securityLogs = [];
-
-// Seed initial sample app entry for immediate testing before build-service calls
-deployedApps.set('sample-app-1', {
-  id: 'sample-app-1',
-  name: 'Sample Express App',
-  repoUrl: 'local://sample-app',
-  status: 'running',
-  targetUrl: 'http://deployshield-app-sample-app-1:3000',
-  hostPort: 8081,
-  createdAt: new Date().toISOString()
+// Prediction endpoint – uses the scikit‑learn model
+app.post('/api/predict', async (req, res) => {
+  try {
+    const prediction = await predict(req.body);
+    res.json({ prediction });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Prediction error' });
+  }
 });
 
+// Health check
 app.get('/health', (req, res) => {
   res.json({ service: 'api-server', status: 'ok' });
 });
 
-// GET /api/apps - List all deployed apps
-app.get('/api/apps', (req, res) => {
-  res.json(Array.from(deployedApps.values()));
-});
-
-// GET /api/apps/:id - Get specific app target address
-app.get('/api/apps/:id', (req, res) => {
-  const appItem = deployedApps.get(req.params.id);
-  if (!appItem) {
-    return res.status(404).json({ error: 'App not found' });
+// -------------------- Apps --------------------
+// List all apps
+app.get('/api/apps', async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT * FROM apps');
+    res.json(rows);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Database error' });
   }
-  res.json(appItem);
 });
 
-// POST /api/apps/register - Internal registration endpoint used by build-service
-app.post('/api/apps/register', (req, res) => {
+// Get specific app by id
+app.get('/api/apps/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const { rows } = await pool.query('SELECT * FROM apps WHERE id = $1', [id]);
+    if (rows.length === 0) return res.status(404).json({ error: 'App not found' });
+    res.json(rows[0]);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Database error' });
+  }
+});
+
+// Register a new app (called by build‑service)
+app.post('/api/apps/register', async (req, res) => {
   const { id, name, repoUrl, targetUrl, hostPort } = req.body;
   if (!id || !targetUrl) {
     return res.status(400).json({ error: 'id and targetUrl are required' });
   }
-
-  const appRecord = {
-    id,
-    name: name || id,
-    repoUrl: repoUrl || 'N/A',
-    status: 'running',
-    targetUrl,
-    hostPort: hostPort || null,
-    createdAt: new Date().toISOString()
-  };
-
-  deployedApps.set(id, appRecord);
-  console.log(`Registered deployed app [${id}] -> ${targetUrl}`);
-  res.status(201).json({ message: 'App registered successfully', app: appRecord });
+  try {
+    await pool.query(
+      `INSERT INTO apps (id, name, repo_url, status, target_url, host_port, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, now())
+       ON CONFLICT (id) DO UPDATE SET
+         name = EXCLUDED.name,
+         repo_url = EXCLUDED.repo_url,
+         status = 'running',
+         target_url = EXCLUDED.target_url,
+         host_port = EXCLUDED.host_port,
+         created_at = now();`,
+      [id, name || id, repoUrl || null, 'running', targetUrl, hostPort || null]
+    );
+    res.status(201).json({ message: 'App registered successfully', id, targetUrl });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Database error while registering app' });
+  }
 });
 
-// POST /api/apps/deploy - Trigger build-service and store deployed app address
+// Deploy a new app – triggers the build‑service
 app.post('/api/apps/deploy', async (req, res) => {
   const { repoUrl, name } = req.body;
-  if (!repoUrl) {
-    return res.status(400).json({ error: 'repoUrl is required' });
-  }
+  if (!repoUrl) return res.status(400).json({ error: 'repoUrl is required' });
 
   const appId = `app-${Date.now().toString(36)}`;
   const appName = name || `App-${appId}`;
 
-  // Pre-register status as building
-  deployedApps.set(appId, {
-    id: appId,
-    name: appName,
-    repoUrl,
-    status: 'building',
-    targetUrl: null,
-    createdAt: new Date().toISOString()
-  });
+  // Pre‑register as building
+  try {
+    await pool.query(
+      `INSERT INTO apps (id, name, repo_url, status, target_url, created_at)
+       VALUES ($1, $2, $3, $4, $5, now())`,
+      [appId, appName, repoUrl, 'building', null]
+    );
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: 'Database error while pre‑registering app' });
+  }
 
   try {
-    // Trigger build-service
     const response = await fetch(`${BUILD_SERVICE_URL}/build`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ repoUrl, appId, name: appName })
     });
-
     const buildResult = await response.json();
 
     if (!response.ok) {
-      deployedApps.set(appId, {
-        ...deployedApps.get(appId),
-        status: 'failed',
-        error: buildResult.error || 'Build failed'
-      });
+      await pool.query(
+        `UPDATE apps SET status = $1, error = $2 WHERE id = $3`,
+        ['failed', buildResult.error || 'Build failed', appId]
+      );
       return res.status(500).json({ error: buildResult.error || 'Build failed' });
     }
-
-    const updatedApp = deployedApps.get(appId);
-    res.status(202).json({
-      message: 'Deployment triggered successfully',
-      app: updatedApp,
-      buildDetails: buildResult
-    });
+    const { rows } = await pool.query('SELECT * FROM apps WHERE id = $1', [appId]);
+    const updatedApp = rows[0];
+    res.status(202).json({ message: 'Deployment triggered successfully', app: updatedApp, buildDetails: buildResult });
   } catch (err) {
-    console.error('Error contacting build-service:', err);
-    deployedApps.set(appId, {
-      ...deployedApps.get(appId),
-      status: 'failed',
-      error: err.message
-    });
+    console.error(err);
+    await pool.query(
+      `UPDATE apps SET status = $1, error = $2 WHERE id = $3`,
+      ['failed', err.message, appId]
+    );
     res.status(500).json({ error: `Build service communication error: ${err.message}` });
   }
 });
 
-// POST /api/logs - Ingest security event logs from Gateway
-app.post('/api/logs', (req, res) => {
+// -------------------- Security logs --------------------
+// Record a security event from the gateway
+app.post('/api/logs', async (req, res) => {
   const { timestamp, clientIp, method, path, attackType, confidence, action } = req.body;
-
-  const eventLog = {
-    id: `evt-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-    timestamp: timestamp || new Date().toISOString(),
-    clientIp: clientIp || req.ip || '127.0.0.1',
-    method: method || 'GET',
-    path: path || '/',
-    attackType: attackType || 'Unknown',
-    confidence: confidence || 0.9,
-    action: action || 'BLOCKED'
-  };
-
-  securityLogs.unshift(eventLog);
-  // Keep last 200 logs
-  if (securityLogs.length > 200) {
-    securityLogs.pop();
+  const id = `evt-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+  try {
+    await pool.query(
+      `INSERT INTO security_logs (id, timestamp, client_ip, method, path, attack_type, confidence, action)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [
+        id,
+        timestamp || new Date().toISOString(),
+        clientIp || req.ip || '127.0.0.1',
+        method || 'GET',
+        path || '/',
+        attackType || 'Unknown',
+        confidence ?? 0.9,
+        action || 'BLOCKED'
+      ]
+    );
+    res.status(201).json({ message: 'Log recorded', id });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Database error while recording log' });
   }
-
-  res.status(201).json({ message: 'Log recorded', event: eventLog });
 });
 
-// GET /api/logs - Return security event logs
-app.get('/api/logs', (req, res) => {
-  res.json(securityLogs);
+// Retrieve the most recent 200 logs
+app.get('/api/logs', async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT * FROM security_logs ORDER BY timestamp DESC LIMIT 200`
+    );
+    res.json(rows);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Database error while fetching logs' });
+  }
 });
 
-// GET /api/stats - Compute live threat metrics
-app.get('/api/stats', (req, res) => {
-  const totalBlocked = securityLogs.length;
-  const blocksByType = {};
-
-  securityLogs.forEach((log) => {
-    const type = log.attackType || 'Unknown';
-    blocksByType[type] = (blocksByType[type] || 0) + 1;
-  });
-
-  res.json({
-    totalScored: totalBlocked * 12 + 45, // Simulated total traffic scored ratio
-    totalBlocked,
-    blocksByType
-  });
+// Stats endpoint – uses the materialised view 'app_stats'
+app.get('/api/stats', async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT * FROM app_stats LIMIT 1');
+    const stats = rows[0] || { total_blocked: 0, blocks_by_type: {} };
+    const totalScored = stats.total_blocked * 12 + 45;
+    res.json({ totalScored, totalBlocked: parseInt(stats.total_blocked, 10), blocksByType: stats.blocks_by_type });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Database error while computing stats' });
+  }
 });
 
 app.listen(PORT, () => {

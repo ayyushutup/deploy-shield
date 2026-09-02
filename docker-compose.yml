@@ -1,4 +1,4 @@
-version: '3.8'
+
 
 networks:
   deployshield-net:
@@ -6,6 +6,15 @@ networks:
     driver: bridge
 
 services:
+  init-db:
+    image: postgres:15-alpine
+    env_file: .env
+    command: ["sh","-c","psql $DATABASE_URL -f /db/init.sql"]
+    volumes:
+      - ./db/init.sql:/db/init.sql:ro
+    networks:
+      - deployshield-net
+
   ml-service:
     build:
       context: ./ml-service
@@ -41,6 +50,8 @@ services:
     environment:
       - PORT=5000
       - BUILD_SERVICE_URL=http://build-service:5001
+    depends_on:
+      - init-db
     networks:
       - deployshield-net
 

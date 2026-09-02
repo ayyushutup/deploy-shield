@@ -7,7 +7,7 @@ function generateToken(payload) {
 
 function authenticateToken(req, res, next) {
   // allow health and login endpoints without token
-  if (req.path === '/health' || req.path.startsWith('/auth/')) {
+  if (req.path === '/health' || req.path === '/login' || req.path.startsWith('/auth/')) {
     return next();
   }
   const authHeader = req.headers['authorization'];

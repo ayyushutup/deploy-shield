@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useContext } from 'react';
 
 const API_BASE = import.meta.env.VITE_API_SERVER_URL || 'http://localhost:5000';
 const GATEWAY_BASE = 'http://localhost:8000';
@@ -131,7 +131,35 @@ export default function App() {
     setAppName('Sample Express Service');
   };
 
+  if (!token) {
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    const username = e.target.username.value;
+    const password = e.target.password.value;
+    const res = await fetch(`${API_BASE}/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    });
+    const data = await res.json();
+    if (res.ok) {
+      login(data.token);
+    } else {
+      alert(data.error || 'Login failed');
+    }
+  };
   return (
+    <div className="login-container" style={{ maxWidth: '400px', margin: '4rem auto', padding: '2rem', background: 'var(--bg-card)', borderRadius: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
+      <h2 style={{ textAlign: 'center', marginBottom: '1rem' }}>DeployShield Admin Login</h2>
+      <form onSubmit={handleLogin}>
+        <input name="username" placeholder="Username" required style={{ width: '100%', marginBottom: '0.5rem', padding: '0.5rem' }} />
+        <input name="password" type="password" placeholder="Password" required style={{ width: '100%', marginBottom: '0.5rem', padding: '0.5rem' }} />
+        <button type="submit" style={{ width: '100%', padding: '0.5rem', background: '#6366f1', color: '#fff', border: 'none', borderRadius: '4px' }}>Login</button>
+      </form>
+    </div>
+  );
+}
+return (
     <div className="dashboard-layout">
       <header>
         <div className="brand">
